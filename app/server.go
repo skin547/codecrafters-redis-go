@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 )
 
 func main() {
@@ -22,29 +26,49 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			conn.Close()
 		}
-		simple_str := "+PONG\r\n"
-		go handle(conn, simple_str)
+		go handle(conn)
 	}
 }
 
-func encode(str string) string {
-	return "+" + str + "\r\n"
+func toRespSimpleStrings(str string) string {
+	return terminated("+" + str)
 }
 
-func handle(conn net.Conn, response string) {
+func terminated(str string) string {
+	return str + "\r\n"
+}
+
+func toRespBulkStrings(str string) string {
+	fmt.Println("toRespBulkStrings")
+	if str == "" {
+		return terminated("$0" + terminated(""))
+	}
+	length := len(str)
+	lenStr := strconv.Itoa(length)
+	fmt.Println(lenStr)
+	res := terminated("$" + terminated(lenStr) + str)
+	fmt.Println(res)
+	return res
+}
+
+func handle(conn net.Conn) {
 	defer conn.Close()
-	data := make([]byte, 512)
-	n, err := conn.Read(data)
-	if err != nil {
-		fmt.Println(err.Error())
+	reader := bufio.NewReader(conn)
+	str, err := reader.ReadString('\n')
+	switch {
+	case err == io.EOF:
+		fmt.Println("Read finish")
 		return
+	case err != nil:
+		fmt.Println("Read failed")
 	}
-	req := string(data[:n])
+	req := strings.Trim(str, "\r\n")
+	fmt.Println(req)
 	fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
 	if req == "PING" {
-		conn.Write([]byte(encode("PONG")))
+		conn.Write([]byte(toRespSimpleStrings("PONG")))
 	} else {
-		conn.Write([]byte(encode(req)))
+		conn.Write([]byte(toRespBulkStrings(req)))
 	}
 	fmt.Println("write response")
 	fmt.Println("connection close")

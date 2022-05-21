@@ -7,8 +7,9 @@ import (
 
 func main() {
 	fmt.Println("echo")
-	echo("PING")
-	echo("HELLO WORLD")
+	echo("PING\r\n")
+	echo("HELLO\r\n")
+	echo("\r\n")
 	// for {
 	// 	go echo()
 	// 	time.Sleep(200 * time.Millisecond)
