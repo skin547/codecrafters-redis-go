@@ -27,6 +27,10 @@ func main() {
 	}
 }
 
+func encode(str string) string {
+	return "+" + str + "\r\n"
+}
+
 func handle(conn net.Conn, response string) {
 	defer conn.Close()
 	data := make([]byte, 512)
@@ -38,9 +42,9 @@ func handle(conn net.Conn, response string) {
 	req := string(data[:n])
 	fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
 	if req == "PING" {
-		conn.Write([]byte("PONG"))
+		conn.Write([]byte(encode("PONG")))
 	} else {
-		conn.Write([]byte(req))
+		conn.Write([]byte(encode(req)))
 	}
 	fmt.Println("write response")
 	fmt.Println("connection close")
