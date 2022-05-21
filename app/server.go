@@ -36,9 +36,12 @@ func handle(conn net.Conn, response string) {
 		return
 	}
 	req := string(data[:n])
-	fmt.Println(req)
 	fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
-	conn.Write([]byte(req))
+	if req == "PING" {
+		conn.Write([]byte("PONG"))
+	} else {
+		conn.Write([]byte(req))
+	}
 	fmt.Println("write response")
 	fmt.Println("connection close")
 }
