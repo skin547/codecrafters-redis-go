@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -21,7 +20,6 @@ func main() {
 		conn, err := l.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
-			conn.Write([]byte(err.Error()))
 			conn.Close()
 		}
 		simple_str := "+PONG\r\n"
@@ -31,18 +29,17 @@ func main() {
 
 func handle(conn net.Conn, response string) {
 	defer conn.Close()
-	scanner := bufio.NewScanner(conn)
-	if !scanner.Scan() {
-		fmt.Println(scanner.Err())
+	data := make([]byte, 512)
+	n, err := conn.Read(data)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
 	}
-	for scanner.Scan() {
-		if len(scanner.Text()) == 0 {
-			break
-		}
-	}
-	req := scanner.Text()
+	req := string(data[:n])
+	fmt.Println(req)
 	fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
-	conn.Write([]byte(response))
+	conn.Write([]byte(req))
+	fmt.Println("write response")
 	fmt.Println("connection close")
 }
 
