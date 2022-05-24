@@ -26,7 +26,33 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			conn.Close()
 		}
-		go handle(conn)
+		fmt.Println("handle a connection:")
+		handle(conn)
+	}
+}
+
+func handle(conn net.Conn) {
+	defer conn.Close()
+	for {
+		reader := bufio.NewReader(conn)
+		str, err := reader.ReadString('\n')
+		if err == io.EOF {
+			fmt.Println("Read finish")
+			break
+		}
+		if err != nil {
+			fmt.Println("Read failed")
+			break
+		}
+		req := strings.Trim(str, "\r\n")
+		fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
+		if req == "PING" {
+			conn.Write([]byte(toRespSimpleStrings("PONG")))
+		} else if req == "*2" {
+			conn.Write([]byte(toRespSimpleStrings("PONG")))
+		} else {
+			conn.Write([]byte(toRespBulkStrings(req)))
+		}
 	}
 }
 
@@ -50,54 +76,3 @@ func toRespBulkStrings(str string) string {
 	fmt.Println(res)
 	return res
 }
-
-func handle(conn net.Conn) {
-	defer conn.Close()
-	reader := bufio.NewReader(conn)
-	str, err := reader.ReadString('\n')
-	switch {
-	case err == io.EOF:
-		fmt.Println("Read finish")
-		return
-	case err != nil:
-		fmt.Println("Read failed")
-	}
-	req := strings.Trim(str, "\r\n")
-	fmt.Println(req)
-	fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
-	if req == "PING" {
-		conn.Write([]byte(toRespSimpleStrings("PONG")))
-	} else {
-		conn.Write([]byte(toRespBulkStrings(req)))
-	}
-	fmt.Println("write response")
-	fmt.Println("connection close")
-}
-
-// func handleConnection(c net.Conn, response string) {
-// 	defer c.Close()
-
-// 	scanner := bufio.NewScanner(c)
-// 	// Scan first line for the request
-// 	if !scanner.Scan() {
-// 		fmt.Println(scanner.Err())
-// 	}
-// 	req := scanner.Text()
-// 	for scanner.Scan() {
-// 		// Scan until an empty line is seen
-// 		if len(scanner.Text()) == 0 {
-// 			break
-// 		}
-// 	}
-// 	fmt.Println("req:", req)
-// 	if strings.HasPrefix(req, "GET") {
-// 		rt := fmt.Sprintf("HTTP/1.1 200 Success\r\n")
-// 		rt += fmt.Sprintf("Connection: Close\r\n")
-// 		rt += fmt.Sprintf("Content-Type: text/html\r\n\r\n")
-// 		rt += fmt.Sprintf("<html><body>Nothing here</body></html>\r\n")
-// 		c.Write([]byte(rt))
-// 	} else {
-// 		rt := fmt.Sprintf("HTTP/1.1 %v Error Occurred\r\n\r\n", 501)
-// 		c.Write([]byte(rt))
-// 	}
-// }
