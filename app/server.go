@@ -35,7 +35,8 @@ func handle(conn net.Conn) {
 	defer conn.Close()
 	for {
 		reader := bufio.NewReader(conn)
-		str, err := reader.ReadString('\n')
+		p := make([]byte, 512)
+		n, err := reader.Read(p)
 		if err == io.EOF {
 			fmt.Println("Read finish")
 			break
@@ -44,14 +45,20 @@ func handle(conn net.Conn) {
 			fmt.Println("Read failed")
 			break
 		}
-		req := strings.Trim(str, "\r\n")
-		fmt.Println("accept a request:", req, " addr:", conn.RemoteAddr())
-		if req == "PING" {
-			conn.Write([]byte(toRespSimpleStrings("PONG")))
-		} else if req == "*2" {
+		fmt.Println("accept a request, addr:", conn.RemoteAddr())
+		str := string(p[:n])
+		first := str[0:1]
+		var arr []string
+		if first == "*" {
+			arr = strings.Split(str[1:], "\r\n")
+			for index, element := range arr {
+				fmt.Print(index, ":", element, ", ")
+			}
+		}
+		if len(arr) == 4 && arr[2] == "PING" {
 			conn.Write([]byte(toRespSimpleStrings("PONG")))
 		} else {
-			conn.Write([]byte(toRespBulkStrings(req)))
+			conn.Write([]byte(toRespBulkStrings(arr[4])))
 		}
 	}
 }
@@ -75,4 +82,8 @@ func toRespBulkStrings(str string) string {
 	res := terminated("$" + terminated(lenStr) + str)
 	fmt.Println(res)
 	return res
+}
+
+func toRespArray(str string) string {
+	return terminated("+" + str)
 }
