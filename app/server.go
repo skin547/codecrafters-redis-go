@@ -55,7 +55,7 @@ func handle(conn net.Conn) {
 				fmt.Print(index, ":", element, ", ")
 			}
 		}
-		if len(arr) == 4 && arr[2] == "PING" {
+		if len(arr) == 4 && strings.EqualFold(arr[2], "PING") {
 			conn.Write([]byte(toRespSimpleStrings("PONG")))
 		} else {
 			conn.Write([]byte(toRespBulkStrings(arr[4])))
