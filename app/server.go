@@ -56,7 +56,16 @@ func handle(conn net.Conn) {
 			}
 		}
 		if len(arr) == 4 && strings.EqualFold(arr[2], "PING") {
-			conn.Write([]byte(toRespSimpleStrings("PONG")))
+			command := arr[2]
+			switch command {
+			case "PING":
+				conn.Write([]byte(toRespSimpleStrings("PONG")))
+			case "ECHO":
+				conn.Write([]byte(toRespBulkStrings(arr[4])))
+			default:
+				err := "not handle type"
+				fmt.Println("err", err)
+			}
 		} else {
 			conn.Write([]byte(toRespBulkStrings(arr[4])))
 		}
