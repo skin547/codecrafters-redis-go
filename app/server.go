@@ -49,25 +49,40 @@ func handle(conn net.Conn) {
 		str := string(p[:n])
 		first := str[0:1]
 		var arr []string
+		resp_arr_len, err := strconv.ParseInt(str[1:2], 10, 0)
+		if err != nil {
+			fmt.Println("err", err)
+		}
 		if first == "*" {
 			arr = strings.Split(str[1:], "\r\n")
 			for index, element := range arr {
 				fmt.Print(index, ":", element, ", ")
 			}
+			fmt.Println()
 		}
-		if len(arr) == 4 && strings.EqualFold(arr[2], "PING") {
-			command := arr[2]
+		command := arr[2]
+		fmt.Println("arr:", arr, "command:", command, "resp_arr_len:", resp_arr_len)
+		with_args := resp_arr_len >= 2
+		fmt.Println("withArgs", with_args)
+		if with_args {
+			args := arr[4]
+			switch command {
+			case "PING":
+				conn.Write([]byte(toRespBulkStrings(args)))
+			case "ECHO":
+				conn.Write([]byte(toRespBulkStrings(args)))
+			default:
+				conn.Write([]byte(toRespSimpleStrings("ERR wrong command to handle")))
+			}
+		} else {
 			switch command {
 			case "PING":
 				conn.Write([]byte(toRespSimpleStrings("PONG")))
 			case "ECHO":
-				conn.Write([]byte(toRespBulkStrings(arr[4])))
+				conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
 			default:
-				err := "not handle type"
-				fmt.Println("err", err)
+				conn.Write([]byte(toRespSimpleStrings("ERR wrong command to handle")))
 			}
-		} else {
-			conn.Write([]byte(toRespBulkStrings(arr[4])))
 		}
 	}
 }
@@ -81,15 +96,13 @@ func terminated(str string) string {
 }
 
 func toRespBulkStrings(str string) string {
-	fmt.Println("toRespBulkStrings")
 	if str == "" {
 		return terminated("$0" + terminated(""))
 	}
 	length := len(str)
 	lenStr := strconv.Itoa(length)
-	fmt.Println(lenStr)
 	res := terminated("$" + terminated(lenStr) + str)
-	fmt.Println(res)
+	fmt.Println("len:", lenStr, " res:", res)
 	return res
 }
 
