@@ -27,7 +27,7 @@ func main() {
 			conn.Close()
 		}
 		fmt.Println("handle a connection:")
-		handle(conn)
+		go handle(conn)
 	}
 }
 
