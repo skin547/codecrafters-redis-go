@@ -60,7 +60,7 @@ func handle(conn net.Conn) {
 			}
 			fmt.Println()
 		}
-		command := arr[2]
+		command := strings.ToUpper(arr[2])
 		fmt.Println("arr:", arr, "command:", command, "resp_arr_len:", resp_arr_len)
 		with_args := resp_arr_len >= 2
 		fmt.Println("withArgs", with_args)
@@ -72,7 +72,7 @@ func handle(conn net.Conn) {
 			case "ECHO":
 				conn.Write([]byte(toRespBulkStrings(args)))
 			default:
-				conn.Write([]byte(toRespSimpleStrings("ERR wrong command to handle")))
+				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
 		} else {
 			switch command {
@@ -81,7 +81,7 @@ func handle(conn net.Conn) {
 			case "ECHO":
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
 			default:
-				conn.Write([]byte(toRespSimpleStrings("ERR wrong command to handle")))
+				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
 		}
 	}
