@@ -10,10 +10,30 @@ import (
 	"strings"
 )
 
+type Store struct {
+	db map[string]string
+}
+
+func NewStore() *Store {
+	store := &Store{db: map[string]string{}}
+	return store
+}
+
+func (k Store) Get(key string) (string, bool) {
+	val, ok := k.db[key]
+	return val, ok
+}
+
+func (k Store) Set(key string, value string) string {
+	k.db[key] = value
+	return "OK"
+}
+
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
-
+	fmt.Println("Initialize key value store...")
+	store := NewStore()
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -27,11 +47,12 @@ func main() {
 			conn.Close()
 		}
 		fmt.Println("handle a connection:")
-		go handle(conn)
+		go handle(conn, store)
 	}
 }
 
-func handle(conn net.Conn) {
+func handle(conn net.Conn, store *Store) {
+	fmt.Println("accept a request, addr:", conn.RemoteAddr())
 	defer conn.Close()
 	for {
 		reader := bufio.NewReader(conn)
@@ -45,7 +66,6 @@ func handle(conn net.Conn) {
 			fmt.Println("Read failed")
 			break
 		}
-		fmt.Println("accept a request, addr:", conn.RemoteAddr())
 		str := string(p[:n])
 		first := str[0:1]
 		var arr []string
@@ -71,6 +91,23 @@ func handle(conn net.Conn) {
 				conn.Write([]byte(toRespBulkStrings(args)))
 			case "ECHO":
 				conn.Write([]byte(toRespBulkStrings(args)))
+			case "SET":
+				if resp_arr_len < 3 {
+					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
+				} else {
+					value := arr[6]
+					store.Set(args, value)
+					conn.Write([]byte(toRespSimpleStrings("OK")))
+					fmt.Println(store)
+				}
+			case "GET":
+				value, exist := store.Get(args)
+				fmt.Println("value", value)
+				if exist {
+					conn.Write([]byte(toRespSimpleStrings(value)))
+				} else {
+					conn.Write([]byte(toRespErrorBulkStrings()))
+				}
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
@@ -93,6 +130,10 @@ func toRespSimpleStrings(str string) string {
 
 func terminated(str string) string {
 	return str + "\r\n"
+}
+
+func toRespErrorBulkStrings() string {
+	return terminated("$-1")
 }
 
 func toRespBulkStrings(str string) string {
