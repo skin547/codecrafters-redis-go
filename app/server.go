@@ -24,7 +24,7 @@ func NewStore() *Store {
 func (k Store) Get(key string) (string, bool) {
 	exp, ok := k.exp[key]
 	if ok {
-		now := time.Now().Unix() * 1000
+		now := time.Now().UnixNano() / int64(time.Millisecond)
 		if exp < now {
 			delete(k.exp, key)
 			delete(k.db, key)
@@ -41,7 +41,7 @@ func (k Store) Set(key string, value string) string {
 }
 
 func (k Store) SetPx(key string, value string, exp int64) string {
-	now := time.Now().Unix() * 1000
+	now := time.Now().UnixNano() / int64(time.Millisecond)
 	k.db[key] = value
 	k.exp[key] = now + exp
 	return "OK"
