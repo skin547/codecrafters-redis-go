@@ -8,18 +8,29 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Store struct {
-	db map[string]string
+	db  map[string]string
+	exp map[string]int64
 }
 
 func NewStore() *Store {
-	store := &Store{db: map[string]string{}}
+	store := &Store{db: map[string]string{}, exp: map[string]int64{}}
 	return store
 }
 
 func (k Store) Get(key string) (string, bool) {
+	exp, ok := k.exp[key]
+	if ok {
+		now := time.Now().Unix() * 1000
+		if exp < now {
+			delete(k.exp, key)
+			delete(k.db, key)
+			return "", false
+		}
+	}
 	val, ok := k.db[key]
 	return val, ok
 }
@@ -29,8 +40,14 @@ func (k Store) Set(key string, value string) string {
 	return "OK"
 }
 
+func (k Store) SetPx(key string, value string, exp int64) string {
+	now := time.Now().Unix() * 1000
+	k.db[key] = value
+	k.exp[key] = now + exp
+	return "OK"
+}
+
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 	fmt.Println("Initialize key value store...")
 	store := NewStore()
@@ -96,13 +113,25 @@ func handle(conn net.Conn, store *Store) {
 					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
 				} else {
 					value := arr[6]
-					store.Set(args, value)
-					conn.Write([]byte(toRespSimpleStrings("OK")))
+					with_opts := resp_arr_len >= 5
+					if with_opts {
+						opt := strings.ToUpper(arr[8])
+						param, err := strconv.ParseInt(arr[10], 0, 64)
+						if err != nil {
+							conn.Write([]byte(toRespSimpleStrings("ERR wrong expire time")))
+						}
+						if opt == "PX" {
+							store.SetPx(args, value, param)
+							conn.Write([]byte(toRespSimpleStrings("OK")))
+						}
+					} else {
+						store.Set(args, value)
+						conn.Write([]byte(toRespSimpleStrings("OK")))
+					}
 					fmt.Println(store)
 				}
 			case "GET":
 				value, exist := store.Get(args)
-				fmt.Println("value", value)
 				if exist {
 					conn.Write([]byte(toRespSimpleStrings(value)))
 				} else {
