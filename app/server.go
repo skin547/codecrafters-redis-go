@@ -22,8 +22,7 @@ func NewStore() *Store {
 }
 
 func (k Store) Get(key string) (string, bool) {
-	exp, ok := k.exp[key]
-	if ok {
+	if exp, exist := k.exp[key]; exist {
 		now := time.Now().UnixNano() / int64(time.Millisecond)
 		if exp < now {
 			delete(k.exp, key)
@@ -131,8 +130,7 @@ func handle(conn net.Conn, store *Store) {
 					fmt.Println(store)
 				}
 			case "GET":
-				value, exist := store.Get(args)
-				if exist {
+				if value, exist := store.Get(args); exist {
 					conn.Write([]byte(toRespSimpleStrings(value)))
 				} else {
 					conn.Write([]byte(toRespErrorBulkStrings()))
@@ -174,8 +172,4 @@ func toRespBulkStrings(str string) string {
 	res := terminated("$" + terminated(lenStr) + str)
 	fmt.Println("len:", lenStr, " res:", res)
 	return res
-}
-
-func toRespArray(str string) string {
-	return terminated("+" + str)
 }
