@@ -43,8 +43,8 @@ func TestStore_SetPx_And_Get(t *testing.T) {
 	}
 
 	time.Sleep(time.Duration(expiration) * time.Millisecond)
-	_, exist := store.Get(key)
+	got2, exist := store.Get(key)
 	if exist {
-		t.Errorf("Expected key '%s' to have expired, but it existed", key)
+		t.Errorf("Expected key '%s' to have expired, but it existed with value %v", key, got2)
 	}
 }

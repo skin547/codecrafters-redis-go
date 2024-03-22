@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"redis-go/internal/command"
 	"redis-go/internal/store"
 	"redis-go/internal/util"
-	"strings"
 )
 
 // Handler handles an incoming connection
@@ -48,35 +48,9 @@ func (h *Handler) Handle() {
 }
 
 func (h *Handler) handlerRequest(str string) {
-	// Split the input string into an array of command and arguments
-	parts := strings.Split(strings.TrimSpace(str), "\r\n")
-
-	// Check if the input string is empty or invalid
-	if len(parts) == 0 {
-		h.conn.Write([]byte(util.ToRespErrorBulkStrings("Invalid command")))
-		return
-	}
-
-	// Extract command and arguments
-	command := strings.ToUpper(parts[0])
-	var args []string
-	if len(parts) > 1 {
-		args = parts[1:]
-	}
-
-	// Execute the command based on its type
-	switch command {
-	case "PING":
-		h.handlePingCommand(args)
-	case "ECHO":
-		h.handleEchoCommand(args)
-	case "SET":
-		h.handleSetCommand(args)
-	case "GET":
-		h.handleGetCommand(args)
-	default:
-		h.conn.Write([]byte(util.ToRespErrorBulkStrings("Unknown command")))
-	}
+	command := command.CreateCommand(str)
+	response := command.Execute()
+	h.conn.Write([]byte(response))
 }
 
 func (h *Handler) handlePingCommand(args []string) {
