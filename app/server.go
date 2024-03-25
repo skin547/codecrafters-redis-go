@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -49,10 +50,13 @@ func (k Store) SetPx(key string, value string, exp int64) string {
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 	fmt.Println("Initialize key value store...")
+	var port string
+	flag.StringVar(&port, "port", "6379", "server port")
+	flag.Parse()
 	store := NewStore()
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
+	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%s", port))
 	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
+		fmt.Println("Failed to bind to port ", port)
 		os.Exit(1)
 	}
 	defer l.Close()
