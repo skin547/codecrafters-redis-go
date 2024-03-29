@@ -142,6 +142,8 @@ func handle(conn net.Conn, store *Store) {
 				} else {
 					conn.Write([]byte(toRespErrorBulkStrings()))
 				}
+			case "INFO":
+				conn.Write([]byte(toRespBulkStrings("role:master")))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
