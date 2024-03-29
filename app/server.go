@@ -39,6 +39,11 @@ func (k Store) Set(key string, value string) string {
 	return "OK"
 }
 
+type ReplicaFlag struct {
+	masterHost string
+	masterPort string
+}
+
 func (k Store) SetPx(key string, value string, exp int64) string {
 	now := time.Now().UnixNano() / int64(time.Millisecond)
 	k.db[key] = value
@@ -46,14 +51,38 @@ func (k Store) SetPx(key string, value string, exp int64) string {
 	return "OK"
 }
 
+type Configuration struct {
+	role string
+}
+
+var config = Configuration{role: "master"}
+
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
 	portPtr := flag.Int("port", 6379, "Port number")
+	var replicaFlag ReplicaFlag
+	flag.Func("replicaof", "Replica of <master_host> <master_port>", func(flagValue string) error {
+		fmt.Println("flagValue" + flagValue)
+		if flagValue == "" {
+			return nil
+		}
+		replicaFlag.masterHost = flagValue
+		if flag.NArg() != 0 {
+			replicaFlag.masterPort = flag.Arg(0)
+		}
+		config.role = "slave"
+		return nil
+	})
+
 	flag.Parse()
 	port := *portPtr
 	address := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Println("Listening on " + address)
+
+	masterHost := replicaFlag.masterHost
+	masterPort := replicaFlag.masterPort
+	fmt.Println("Replica of " + masterHost + ":" + masterPort)
 	l, err := net.Listen("tcp", address)
 
 	if err != nil {
@@ -143,7 +172,7 @@ func handle(conn net.Conn, store *Store) {
 					conn.Write([]byte(toRespErrorBulkStrings()))
 				}
 			case "INFO":
-				conn.Write([]byte(toRespBulkStrings("role:master")))
+				conn.Write([]byte(toRespBulkStrings("role:" + config.role)))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
