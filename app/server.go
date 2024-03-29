@@ -56,7 +56,7 @@ func (k Store) SetPx(key string, value string, exp int64) string {
 
 type Config struct {
 	role    string
-	replica ReplicaConfig
+	replica *ReplicaConfig
 }
 
 var config = Config{role: "master"}
@@ -76,6 +76,27 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+func handshakeToMaster() {
+	masterAddress := config.replica.masterHost + ":" + config.replica.masterPort
+	fmt.Println("handshake to master at ", masterAddress)
+	conn, err := net.Dial("tcp", masterAddress)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte(toRespArrays([]string{"PING"})))
+	if err != nil {
+		panic(err)
+	}
+	data := make([]byte, 512)
+	n, err := conn.Read(data)
+	if err != nil {
+		panic(err.Error())
+	}
+	res := string(data[:n])
+	fmt.Println("handshake response: ", res)
+}
+
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
@@ -93,21 +114,21 @@ func main() {
 		config.role = "slave"
 		return nil
 	})
-	config.replica = replicaConfig
+	config.replica = &replicaConfig
 	if config.role == "master" {
 		config.replica.offset = 0
 		config.replica.replicationId = generateRandomString(replicaIdLen)
 	}
-
 	flag.Parse()
 	port := *portPtr
 	address := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Println("Listening on " + address)
 
-	masterHost := replicaConfig.masterHost
-	masterPort := replicaConfig.masterPort
-	fmt.Println("Replica of " + masterHost + ":" + masterPort)
+	fmt.Println("Replica of " + config.replica.masterHost + ":" + config.replica.masterPort)
 	l, err := net.Listen("tcp", address)
+	if config.role == "slave" {
+		handshakeToMaster()
+	}
 
 	if err != nil {
 		panic(fmt.Sprintf("Failed to bind to port %d", port))
@@ -233,5 +254,13 @@ func toRespBulkStrings(str string) string {
 	lenStr := strconv.Itoa(length)
 	res := terminated("$" + terminated(lenStr) + str)
 	fmt.Println("len:", lenStr, " res:", res)
+	return res
+}
+
+func toRespArrays(arr []string) string {
+	res := fmt.Sprintf("*%d\r\n", len(arr))
+	for _, element := range arr {
+		res += toRespBulkStrings(element)
+	}
 	return res
 }
