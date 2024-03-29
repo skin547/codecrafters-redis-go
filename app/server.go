@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -39,9 +40,11 @@ func (k Store) Set(key string, value string) string {
 	return "OK"
 }
 
-type ReplicaFlag struct {
-	masterHost string
-	masterPort string
+type ReplicaConfig struct {
+	masterHost    string
+	masterPort    string
+	offset        int
+	replicationId string
 }
 
 func (k Store) SetPx(key string, value string, exp int64) string {
@@ -51,37 +54,58 @@ func (k Store) SetPx(key string, value string, exp int64) string {
 	return "OK"
 }
 
-type Configuration struct {
-	role string
+type Config struct {
+	role    string
+	replica ReplicaConfig
 }
 
-var config = Configuration{role: "master"}
+var config = Config{role: "master"}
+var replicaIdLen = 40
+
+func generateRandomString(l int) string {
+	charSet := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+
+	s := make([]rune, l)
+	for i := range s {
+		s[i] = charSet[rand.Intn(len(charSet))]
+	}
+	return string(s)
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 
 	portPtr := flag.Int("port", 6379, "Port number")
-	var replicaFlag ReplicaFlag
+	var replicaConfig ReplicaConfig
 	flag.Func("replicaof", "Replica of <master_host> <master_port>", func(flagValue string) error {
 		fmt.Println("flagValue" + flagValue)
 		if flagValue == "" {
 			return nil
 		}
-		replicaFlag.masterHost = flagValue
+		replicaConfig.masterHost = flagValue
 		if flag.NArg() != 0 {
-			replicaFlag.masterPort = flag.Arg(0)
+			replicaConfig.masterPort = flag.Arg(0)
 		}
 		config.role = "slave"
 		return nil
 	})
+	config.replica = replicaConfig
+	if config.role == "master" {
+		config.replica.offset = 0
+		config.replica.replicationId = generateRandomString(replicaIdLen)
+	}
 
 	flag.Parse()
 	port := *portPtr
 	address := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Println("Listening on " + address)
 
-	masterHost := replicaFlag.masterHost
-	masterPort := replicaFlag.masterPort
+	masterHost := replicaConfig.masterHost
+	masterPort := replicaConfig.masterPort
 	fmt.Println("Replica of " + masterHost + ":" + masterPort)
 	l, err := net.Listen("tcp", address)
 
@@ -172,7 +196,7 @@ func handle(conn net.Conn, store *Store) {
 					conn.Write([]byte(toRespErrorBulkStrings()))
 				}
 			case "INFO":
-				conn.Write([]byte(toRespBulkStrings("role:" + config.role)))
+				conn.Write([]byte(toRespBulkStrings("role:" + config.role + "\r\n" + "master_replid:" + config.replica.replicationId + "\r\n" + "master_repl_offset:" + strconv.Itoa(config.replica.offset) + "\r\n")))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
