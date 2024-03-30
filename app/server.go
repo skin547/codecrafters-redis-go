@@ -229,7 +229,7 @@ func handle(conn net.Conn, store *Store) {
 					conn.Write([]byte(toRespErrorBulkStrings()))
 				}
 			case "INFO":
-				conn.Write([]byte(toRespBulkStrings("role:" + config.role + "\r\n" + "master_replid:" + config.replica.replicationId + "\r\n" + "master_repl_offset:" + strconv.Itoa(config.replica.offset) + "\r\n")))
+				conn.Write([]byte(toRespBulkStrings(fmt.Sprintf("role:%s\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\n", config.role, config.replica.replicationId, config.replica.offset))))
 			case "REPLCONF":
 				conn.Write([]byte(toRespSimpleStrings("OK")))
 			case "PSYNC":
