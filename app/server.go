@@ -57,6 +57,7 @@ func (k Store) SetPx(key string, value string, exp int64) string {
 type Config struct {
 	role    string
 	replica *ReplicaConfig
+	port    string
 }
 
 var config = Config{role: "master"}
@@ -76,25 +77,34 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-func handshakeToMaster() {
-	masterAddress := config.replica.masterHost + ":" + config.replica.masterPort
-	fmt.Println("handshake to master at ", masterAddress)
-	conn, err := net.Dial("tcp", masterAddress)
+func connectToMaster(address string) net.Conn {
+	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		panic(err.Error())
 	}
-	defer conn.Close()
-	_, err = conn.Write([]byte(toRespArrays([]string{"PING"})))
+	return conn
+}
+
+func sendCommand(conn net.Conn, msg []string) string {
+	_, err := conn.Write([]byte(toRespArrays(msg)))
 	if err != nil {
-		panic(err)
+		fmt.Println(err.Error())
 	}
-	data := make([]byte, 512)
+	data := make([]byte, 1024)
 	n, err := conn.Read(data)
 	if err != nil {
-		panic(err.Error())
+		fmt.Println(err.Error())
 	}
 	res := string(data[:n])
-	fmt.Println("handshake response: ", res)
+	return res
+}
+
+func handshakeToMaster() {
+	masterAddress := config.replica.masterHost + ":" + config.replica.masterPort
+	conn := connectToMaster(masterAddress)
+	sendCommand(conn, []string{"PING"})
+	sendCommand(conn, []string{"REPLCONF", "listening-port", config.port})
+	sendCommand(conn, []string{"REPLCONF", "capa", "psync2"})
 }
 
 func main() {
@@ -121,6 +131,7 @@ func main() {
 	}
 	flag.Parse()
 	port := *portPtr
+	config.port = strconv.Itoa(port)
 	address := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Println("Listening on " + address)
 
@@ -218,6 +229,8 @@ func handle(conn net.Conn, store *Store) {
 				}
 			case "INFO":
 				conn.Write([]byte(toRespBulkStrings("role:" + config.role + "\r\n" + "master_replid:" + config.replica.replicationId + "\r\n" + "master_repl_offset:" + strconv.Itoa(config.replica.offset) + "\r\n")))
+			case "REPLCONF":
+				conn.Write([]byte(toRespSimpleStrings("OK")))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
