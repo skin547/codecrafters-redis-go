@@ -105,6 +105,7 @@ func handshakeToMaster() {
 	sendCommand(conn, []string{"PING"})
 	sendCommand(conn, []string{"REPLCONF", "listening-port", config.port})
 	sendCommand(conn, []string{"REPLCONF", "capa", "psync2"})
+	sendCommand(conn, []string{"PSYNC", "?", "-1"})
 }
 
 func main() {
@@ -231,6 +232,8 @@ func handle(conn net.Conn, store *Store) {
 				conn.Write([]byte(toRespBulkStrings("role:" + config.role + "\r\n" + "master_replid:" + config.replica.replicationId + "\r\n" + "master_repl_offset:" + strconv.Itoa(config.replica.offset) + "\r\n")))
 			case "REPLCONF":
 				conn.Write([]byte(toRespSimpleStrings("OK")))
+			case "PSYNC":
+				conn.Write([]byte(toRespSimpleStrings(fmt.Sprintf("FULLRESYNC %s %d", config.replica.replicationId, config.replica.offset))))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
