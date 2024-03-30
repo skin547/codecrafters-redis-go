@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
@@ -97,6 +98,15 @@ func sendCommand(conn net.Conn, msg []string) string {
 	}
 	res := string(data[:n])
 	return res
+}
+
+func getRdbFile() []byte {
+	contentsInBase64 := "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog=="
+	contents, err := base64.StdEncoding.DecodeString(contentsInBase64)
+	if err != nil {
+		panic(err.Error())
+	}
+	return contents
 }
 
 func handshakeToMaster() {
@@ -234,6 +244,8 @@ func handle(conn net.Conn, store *Store) {
 				conn.Write([]byte(toRespSimpleStrings("OK")))
 			case "PSYNC":
 				conn.Write([]byte(toRespSimpleStrings(fmt.Sprintf("FULLRESYNC %s %d", config.replica.replicationId, config.replica.offset))))
+				rdbFile := getRdbFile()
+				conn.Write([]byte(toRdbResponse(rdbFile)))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
@@ -279,4 +291,8 @@ func toRespArrays(arr []string) string {
 		res += toRespBulkStrings(element)
 	}
 	return res
+}
+
+func toRdbResponse(rdbFile []byte) string {
+	return fmt.Sprintf("$%d\r\n%s", len(rdbFile), string(rdbFile))
 }
