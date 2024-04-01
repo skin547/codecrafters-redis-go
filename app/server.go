@@ -41,18 +41,18 @@ func (k Store) Set(key string, value string) string {
 	return "OK"
 }
 
-type ReplicaConfig struct {
-	masterHost    string
-	masterPort    string
-	offset        int
-	replicationId string
-}
-
 func (k Store) SetPx(key string, value string, exp int64) string {
 	now := time.Now().UnixNano() / int64(time.Millisecond)
 	k.db[key] = value
 	k.exp[key] = now + exp
 	return "OK"
+}
+
+type ReplicaConfig struct {
+	masterHost    string
+	masterPort    string
+	offset        int
+	replicationId string
 }
 
 type Config struct {
@@ -63,6 +63,8 @@ type Config struct {
 
 var config = Config{role: "master"}
 var replicaIdLen = 40
+
+var replicas []net.Conn
 
 func generateRandomString(l int) string {
 	charSet := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -131,14 +133,15 @@ func main() {
 		replicaConfig.masterHost = flagValue
 		if flag.NArg() != 0 {
 			replicaConfig.masterPort = flag.Arg(0)
+			config.role = "slave"
 		}
-		config.role = "slave"
 		return nil
 	})
 	config.replica = &replicaConfig
 	if config.role == "master" {
 		config.replica.offset = 0
 		config.replica.replicationId = generateRandomString(replicaIdLen)
+		replicas = []net.Conn{}
 	}
 	flag.Parse()
 	port := *portPtr
@@ -164,6 +167,7 @@ func main() {
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 			conn.Close()
+			continue
 		}
 		fmt.Println("handle a connection:")
 		go handle(conn, store)
@@ -173,6 +177,7 @@ func main() {
 func handle(conn net.Conn, store *Store) {
 	fmt.Println("accept a request, addr:", conn.RemoteAddr())
 	defer conn.Close()
+
 	for {
 		reader := bufio.NewReader(conn)
 		p := make([]byte, 512)
@@ -226,9 +231,19 @@ func handle(conn net.Conn, store *Store) {
 							store.SetPx(args, value, param)
 							conn.Write([]byte(toRespSimpleStrings("OK")))
 						}
+						go func() {
+							for _, replica := range replicas {
+								sendCommand(replica, []string{command, args, value, opt, strconv.FormatInt(param, 10)})
+							}
+						}()
 					} else {
 						store.Set(args, value)
 						conn.Write([]byte(toRespSimpleStrings("OK")))
+						go func() {
+							for _, replica := range replicas {
+								sendCommand(replica, []string{command, args, value})
+							}
+						}()
 					}
 					fmt.Println(store)
 				}
@@ -246,6 +261,7 @@ func handle(conn net.Conn, store *Store) {
 				conn.Write([]byte(toRespSimpleStrings(fmt.Sprintf("FULLRESYNC %s %d", config.replica.replicationId, config.replica.offset))))
 				rdbFile := getRdbFile()
 				conn.Write([]byte(toRdbResponse(rdbFile)))
+				replicas = append(replicas, conn)
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
