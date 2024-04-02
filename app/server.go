@@ -175,7 +175,7 @@ func main() {
 }
 
 func handle(conn net.Conn, store *Store) {
-	fmt.Println("accept a request, addr:", conn.RemoteAddr())
+	fmt.Println("accept a request, addr:", conn.RemoteAddr().String())
 	defer conn.Close()
 
 	for {
@@ -231,21 +231,20 @@ func handle(conn net.Conn, store *Store) {
 							store.SetPx(args, value, param)
 							conn.Write([]byte(toRespSimpleStrings("OK")))
 						}
-						go func() {
-							for _, replica := range replicas {
+						for _, replica := range replicas {
+							go func(replica net.Conn) {
 								sendCommand(replica, []string{command, args, value, opt, strconv.FormatInt(param, 10)})
-							}
-						}()
+							}(replica)
+						}
 					} else {
 						store.Set(args, value)
 						conn.Write([]byte(toRespSimpleStrings("OK")))
-						go func() {
-							for _, replica := range replicas {
+						for _, replica := range replicas {
+							go func(replica net.Conn) {
 								sendCommand(replica, []string{command, args, value})
-							}
-						}()
+							}(replica)
+						}
 					}
-					fmt.Println(store)
 				}
 			case "GET":
 				if value, exist := store.Get(args); exist {
