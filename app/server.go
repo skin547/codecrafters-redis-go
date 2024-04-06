@@ -10,41 +10,47 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Store struct {
-	db  map[string]string
-	exp map[string]int64
+	db  sync.Map
+	exp sync.Map
 }
 
 func NewStore() *Store {
-	store := &Store{db: map[string]string{}, exp: map[string]int64{}}
+	store := &Store{db: sync.Map{}, exp: sync.Map{}}
 	return store
 }
 
-func (k Store) Get(key string) (string, bool) {
-	if exp, exist := k.exp[key]; exist {
+func (k *Store) Get(key string) (string, bool) {
+	value, ok := k.db.Load(key)
+	if !ok {
+		return "", false
+	}
+	expiration, expOk := k.exp.Load(key)
+	if expOk {
+		expTime := expiration.(int64)
 		now := time.Now().UnixNano() / int64(time.Millisecond)
-		if exp < now {
-			delete(k.exp, key)
-			delete(k.db, key)
+		if expTime < now {
+			k.db.Delete(key)
+			k.exp.Delete(key)
 			return "", false
 		}
 	}
-	val, ok := k.db[key]
-	return val, ok
+	return value.(string), ok
 }
 
-func (k Store) Set(key string, value string) string {
-	k.db[key] = value
+func (k *Store) Set(key string, value string) string {
+	k.db.Store(key, value)
 	return "OK"
 }
 
-func (k Store) SetPx(key string, value string, exp int64) string {
+func (k *Store) SetPx(key string, value string, exp int64) string {
 	now := time.Now().UnixNano() / int64(time.Millisecond)
-	k.db[key] = value
-	k.exp[key] = now + exp
+	k.db.Store(key, value)
+	k.exp.Store(key, now+exp)
 	return "OK"
 }
 
