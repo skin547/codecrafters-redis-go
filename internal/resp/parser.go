@@ -91,8 +91,8 @@ func parseBulkString(input string) (*RESP, error) {
 	if length == -1 {
 		return &RESP{Type: BulkString, Data: nil}, nil // Nil bulk string
 	}
-	startIndex := end + 2
-	if int64(len(input)) < int64(startIndex)+length+2 {
+	startIndex := end + len("\r\n")
+	if int64(len(input)) < int64(startIndex)+length+int64(len("\r\n")) {
 		return nil, errors.New("invalid bulk string: data too short")
 	}
 	data := input[startIndex : startIndex+int(length)]
@@ -112,7 +112,7 @@ func parseArray(input string) (*RESP, error) {
 		return nil, errors.New("invalid array length")
 	}
 	elements := make([]*RESP, 0, arrayLength)
-	currentIndex := arrHeaderEnd + 2 // Start right after the init CRLF
+	currentIndex := arrHeaderEnd + len("\r\n") // Start right after the init CRLF
 
 	for i := int64(0); i < arrayLength; i++ {
 		if currentIndex >= len(input) {
@@ -143,22 +143,32 @@ func parseNextElement(input string, startIndex int) (*RESP, int, error) {
 	}
 	var lengthOfParsed int
 	switch nextResp.Type {
-	case BulkString, SimpleString, Error:
+	case SimpleString, Error:
 		if str, ok := nextResp.Data.(string); ok {
-			lengthOfParsed = len(str) + 2 // CRLF
+			lengthOfParsed = len("+") + len(str) // CRLF
 		} else {
 			return nil, startIndex, errors.New("expected string data type")
 		}
 	case Integer:
 		if _, ok := nextResp.Data.(int64); ok {
-			lengthOfParsed = len(fmt.Sprintf("%d", nextResp.Data.(int64))) + 2
+			lengthOfParsed = len(":") + len(fmt.Sprintf("%d", nextResp.Data.(int64)))
 		} else {
 			return nil, startIndex, errors.New("expected integer data type")
 		}
-	}
-
-	if nextResp.Type == BulkString || nextResp.Type == SimpleString || nextResp.Type == Error {
-		lengthOfParsed += 2 // Extra count for '$', '+' or '-' prefix
+	// TODO: fix dynamic type resp value by calculate end index when parsing
+	case BulkString:
+		lengthSpecifier := strconv.Itoa(len(nextResp.Data.(string)))
+		if str, ok := nextResp.Data.(string); ok {
+			lengthOfParsed = len("$") + len(lengthSpecifier) + len("\r\n") + len(str)
+		} else {
+			return nil, startIndex, errors.New("expected string data type")
+		}
+	case Array:
+		if _, ok := nextResp.Data.([]*RESP); ok {
+			lengthOfParsed = len("*") + len(fmt.Sprintf("%d", len(nextResp.Data.([]*RESP))))
+		} else {
+			return nil, startIndex, errors.New("expected array data type")
+		}
 	}
 
 	nextIndex := startIndex + lengthOfParsed + len("\r\n")
