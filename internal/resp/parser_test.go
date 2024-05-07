@@ -125,7 +125,7 @@ func TestParseInvalidType(t *testing.T) {
 	}
 }
 
-func TestParseArray(t *testing.T) {
+func TestParseArrayOfBulkStrings(t *testing.T) {
 	input := "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
 	expected := &RESP{
 		Type: Array,
@@ -140,6 +140,47 @@ func TestParseArray(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("parseArray returned %+v, expected %+v", result, expected)
+	}
+}
+
+func TestParseArrayOfSimpleString(t *testing.T) {
+	input := "*2\r\n+foo\r\n+bar\r\n"
+	expected := &RESP{
+		Type: Array,
+		Data: []*RESP{
+			{Type: SimpleString, Data: "foo"},
+			{Type: SimpleString, Data: "bar"},
+		},
+	}
+	result, err := parseArray(input)
+	if err != nil {
+		t.Errorf("parseArray returned an error: %v", err)
+	}
+	if !reflect.DeepEqual(result, expected) {
+		t.Errorf("parseArray returned %+v, expected %+v", result, expected)
+	}
+}
+
+func TestParseArrayWithIntegers(t *testing.T) {
+	// Input representing an array of two integers
+	input := "*2\r\n:123\r\n:456\r\n"
+	expected := &RESP{
+		Type: Array,
+		Data: []*RESP{
+			{Type: Integer, Data: int64(123)},
+			{Type: Integer, Data: int64(456)},
+		},
+	}
+
+	// Call the ParseRESP function or the specific array parsing function
+	got, err := ParseRESP(input)
+	if err != nil {
+		t.Fatalf("ParseRESP failed with error: %v", err)
+	}
+
+	// Compare the parsed output to the expected output
+	if !reflect.DeepEqual(got, expected) {
+		t.Errorf("ParseRESP returned incorrect result, got %+v, want %+v", got, expected)
 	}
 }
 
@@ -216,11 +257,11 @@ func TestParseArrayWithIntegerAndString(t *testing.T) {
 }
 
 func TestParseArrayWithBulkStringAndError(t *testing.T) {
-	input := "*2\r\n$3\r\nfoo\r\n-Error\r\n"
+	input := "*2\r\n$10\r\nfooooooooo\r\n-Error\r\n"
 	expected := &RESP{
 		Type: Array,
 		Data: []*RESP{
-			{Type: BulkString, Data: "foo"},
+			{Type: BulkString, Data: "fooooooooo"},
 			{Type: Error, Data: "Error"},
 		},
 	}
@@ -230,7 +271,7 @@ func TestParseArrayWithBulkStringAndError(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	if !reflect.DeepEqual(got, expected) {
-		t.Errorf("Got = %+v, want %+v", got, expected)
+		t.Errorf("Got = %+s, want %+s", got.Data, expected.Data)
 	}
 }
 
