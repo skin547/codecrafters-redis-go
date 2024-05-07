@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -11,6 +12,7 @@ type Store struct {
 }
 
 func NewStore() *Store {
+	fmt.Println("Initialize key value store...")
 	store := &Store{db: sync.Map{}, exp: sync.Map{}}
 	return store
 }
