@@ -141,60 +141,51 @@ func parseNextElement(input string, startIndex int) (*RESP, int, error) {
 	if err != nil {
 		return nil, startIndex, err
 	}
-	var lengthOfParsed int
+	lengthOfParsed, err := calculateContentLength(nextResp)
+	if err != nil {
+		return nil, startIndex, err
+	}
+
+	nextIndex := startIndex + lengthOfParsed + len("\r\n")
+	return nextResp, nextIndex, nil
+
+}
+
+func calculateContentLength(nextResp *RESP) (int, error) {
+	var lengthOfParsed = 0
 	switch nextResp.Type {
 	case SimpleString, Error:
 		if str, ok := nextResp.Data.(string); ok {
-			lengthOfParsed = len("+") + len(str) // CRLF
+			lengthOfParsed = len("+") + len(str)
 		} else {
-			return nil, startIndex, errors.New("expected string data type")
+			return 0, errors.New("expected string data type")
 		}
 	case Integer:
 		if _, ok := nextResp.Data.(int64); ok {
 			lengthOfParsed = len(":") + len(fmt.Sprintf("%d", nextResp.Data.(int64)))
 		} else {
-			return nil, startIndex, errors.New("expected integer data type")
+			return 0, errors.New("expected integer data type")
 		}
 	case BulkString:
 		lengthSpecifier := strconv.Itoa(len(nextResp.Data.(string)))
 		if str, ok := nextResp.Data.(string); ok {
 			lengthOfParsed = len("$") + len(lengthSpecifier) + len("\r\n") + len(str)
 		} else {
-			return nil, startIndex, errors.New("expected string data type")
+			return 0, errors.New("expected string data type")
 		}
 	case Array:
 		if arr, ok := nextResp.Data.([]*RESP); ok {
 			lengthOfParsed = len("*") + len(fmt.Sprintf("%d", cap(arr)))
 			for _, element := range arr {
-				switch element.Type {
-				case SimpleString, Error:
-					if str, ok := element.Data.(string); ok {
-						lengthOfParsed += len("+") + len(str)
-					} else {
-						return nil, startIndex, errors.New("expected string data type")
-					}
-				case Integer:
-					if _, ok := element.Data.(int64); ok {
-						lengthOfParsed += len(":") + len(fmt.Sprintf("%d", element.Data.(int64)))
-					} else {
-						return nil, startIndex, errors.New("expected integer data type")
-					}
-				case BulkString:
-					lengthSpecifier := strconv.Itoa(len(element.Data.(string)))
-					if str, ok := element.Data.(string); ok {
-						lengthOfParsed += len("$") + len(lengthSpecifier) + len("\r\n") + len(str)
-					} else {
-						return nil, startIndex, errors.New("expected string data type")
-					}
+				contentLength, err := calculateContentLength(element)
+				if err != nil {
+					return 0, err
 				}
-				lengthOfParsed += len("\r\n")
+				lengthOfParsed += contentLength + len("\r\n")
 			}
 		} else {
-			return nil, startIndex, errors.New("expected array data type")
+			return 0, errors.New("expected array data type")
 		}
 	}
-
-	nextIndex := startIndex + lengthOfParsed + len("\r\n")
-	return nextResp, nextIndex, nil
-
+	return lengthOfParsed, nil
 }
