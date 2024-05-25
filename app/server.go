@@ -32,7 +32,12 @@ type Config struct {
 var config = Config{role: "master"}
 var replicaIdLen = 40
 
-var replicas []net.Conn
+type Replica struct {
+	address string
+	port    int
+}
+
+var replicas []Replica
 
 func generateRandomString(l int) string {
 	charSet := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -67,6 +72,7 @@ func sendCommand(conn net.Conn, msg []string) string {
 		fmt.Println(err.Error())
 	}
 	res := string(data[:n])
+	fmt.Println("handshake response: ", res)
 	return res
 }
 
@@ -81,7 +87,9 @@ func getRdbFile() []byte {
 
 func handshakeToMaster() {
 	masterAddress := config.replica.masterHost + ":" + config.replica.masterPort
+	fmt.Println("handshake with master: " + masterAddress)
 	conn := connectToMaster(masterAddress)
+	defer conn.Close()
 	sendCommand(conn, []string{"PING"})
 	sendCommand(conn, []string{"REPLCONF", "listening-port", config.port})
 	sendCommand(conn, []string{"REPLCONF", "capa", "psync2"})
@@ -94,7 +102,7 @@ func main() {
 	portPtr := flag.Int("port", 6379, "Port number")
 	var replicaConfig ReplicaConfig
 	flag.Func("replicaof", "Replica of <master_host> <master_port>", func(flagValue string) error {
-		fmt.Println("flagValue" + flagValue)
+		fmt.Println("flagValue: " + flagValue)
 		if flagValue == "" {
 			return nil
 		}
@@ -109,7 +117,7 @@ func main() {
 	if config.role == "master" {
 		config.replica.offset = 0
 		config.replica.replicationId = generateRandomString(replicaIdLen)
-		replicas = []net.Conn{}
+		replicas = []Replica{}
 	}
 	flag.Parse()
 	port := *portPtr
@@ -117,11 +125,11 @@ func main() {
 	address := fmt.Sprintf("0.0.0.0:%d", port)
 	fmt.Println("Listening on " + address)
 
-	fmt.Println("Replica of " + config.replica.masterHost + ":" + config.replica.masterPort)
-	l, err := net.Listen("tcp", address)
+	fmt.Println("Replica of " + config.replica.masterHost + ":" + config.replica.masterPort + " role: " + config.role + " port: " + config.port)
 	if config.role == "slave" {
 		handshakeToMaster()
 	}
+	l, err := net.Listen("tcp", address)
 
 	if err != nil {
 		panic(fmt.Sprintf("Failed to bind to port %d", port))
@@ -186,6 +194,7 @@ func handle(conn net.Conn, store *store.Store) {
 				break
 			}
 			command := strings.ToUpper(data[0].Data.(string))
+			fmt.Printf("command: %s\n", command)
 			switch command {
 			case "PING":
 				if len(data) < 2 {
@@ -221,16 +230,28 @@ func handle(conn net.Conn, store *store.Store) {
 							conn.Write([]byte(toRespSimpleStrings("OK")))
 						}
 						for _, replica := range replicas {
-							go func(replica net.Conn) {
-								sendCommand(replica, []string{command, key, value, opt, strconv.FormatInt(param, 10)})
+							fmt.Println("send command to replica: ", replica.address, ":", replica.port)
+							go func(replica Replica) {
+								replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
+								if err != nil {
+									fmt.Println(err.Error())
+									return
+								}
+								sendCommand(replicaConn, []string{command, key, value, opt, strconv.FormatInt(param, 10)})
 							}(replica)
 						}
 					} else {
 						store.Set(key, value)
 						conn.Write([]byte(toRespSimpleStrings("OK")))
 						for _, replica := range replicas {
-							go func(replica net.Conn) {
-								sendCommand(replica, []string{command, key, value})
+							fmt.Println("send command to replica: ", replica.address, ":", replica.port)
+							go func(replica Replica) {
+								replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
+								if err != nil {
+									fmt.Println(err.Error())
+									return
+								}
+								sendCommand(replicaConn, []string{command, key, value})
 							}(replica)
 						}
 					}
@@ -245,12 +266,28 @@ func handle(conn net.Conn, store *store.Store) {
 			case "INFO":
 				conn.Write([]byte(toRespBulkStrings(fmt.Sprintf("role:%s\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\n", config.role, config.replica.replicationId, config.replica.offset))))
 			case "REPLCONF":
+				if len(data) < 2 {
+					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
+					break
+				}
+				args := strings.ToUpper(data[1].Data.(string))
+				if args == "LISTENING-PORT" {
+					port, err := strconv.Atoi(data[2].Data.(string))
+					if err != nil {
+						fmt.Println(err.Error())
+						conn.Write([]byte(toRespSimpleStrings("ERR wrong replconf port")))
+						break
+					}
+					replicas = append(replicas, Replica{
+						address: strings.Split(conn.RemoteAddr().String(), ":")[0],
+						port:    port,
+					})
+				}
 				conn.Write([]byte(toRespSimpleStrings("OK")))
 			case "PSYNC":
 				conn.Write([]byte(toRespSimpleStrings(fmt.Sprintf("FULLRESYNC %s %d", config.replica.replicationId, config.replica.offset))))
 				rdbFile := getRdbFile()
 				conn.Write([]byte(toRdbResponse(rdbFile)))
-				replicas = append(replicas, conn)
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
