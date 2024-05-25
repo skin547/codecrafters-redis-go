@@ -8,7 +8,9 @@ import (
 	"io"
 	"math/rand"
 	"net"
-	store "redis-go/internal"
+	"redis-go/internal/store"
+	"redis-go/pkg/resp"
+	Resp "redis-go/pkg/resp"
 	"strconv"
 	"strings"
 	"time"
@@ -126,7 +128,6 @@ func main() {
 	}
 	defer l.Close()
 
-	fmt.Println("Initialize key value store...")
 	store := store.NewStore()
 	for {
 		conn, err := l.Accept()
@@ -157,63 +158,86 @@ func handle(conn net.Conn, store *store.Store) {
 			break
 		}
 		str := string(p[:n])
-		first := str[0:1]
-		var arr []string
-		resp_arr_len, err := strconv.ParseInt(str[1:2], 10, 0)
+		fmt.Println("Read: ", string(p[:n]))
+		req, err := Resp.ParseRESP(str)
 		if err != nil {
-			fmt.Println("err", err)
+			fmt.Printf("Parse RESP failed, input: %s\nerr: %s\n", str, err.Error())
+			break
 		}
-		if first == "*" {
-			arr = strings.Split(str[1:], "\r\n")
-			for index, element := range arr {
-				fmt.Print(index, ":", element, ", ")
+		fmt.Printf("req.Type: %v, req.Data: %v\n", req.Type, req.Data)
+		switch req.Type {
+		case Resp.SimpleString:
+			{
+				command := strings.ToUpper(req.Data.([]string)[0])
+				fmt.Printf("command: %s\n", command)
+				switch command {
+				case "PING":
+					conn.Write([]byte(toRespSimpleStrings("PONG")))
+				case "ECHO":
+					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
+				default:
+					conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
+				}
 			}
-			fmt.Println()
-		}
-		command := strings.ToUpper(arr[2])
-		fmt.Println("arr:", arr, "command:", command, "resp_arr_len:", resp_arr_len)
-		with_args := resp_arr_len >= 2
-		fmt.Println("withArgs", with_args)
-		if with_args {
-			args := arr[4]
+		case Resp.Array:
+			data := req.Data.([]*resp.RESP)
+			if data[0].Type != resp.BulkString {
+				conn.Write([]byte(toRespSimpleStrings("ERR wrong command")))
+				break
+			}
+			command := strings.ToUpper(data[0].Data.(string))
 			switch command {
 			case "PING":
+				if len(data) < 2 {
+					conn.Write([]byte(toRespSimpleStrings("PONG")))
+					break
+				}
+				args := strings.ToUpper(data[1].Data.(string))
+				fmt.Printf("command: %s, args: %s\n", command, args)
 				conn.Write([]byte(toRespBulkStrings(args)))
 			case "ECHO":
+				if len(data) < 2 {
+					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
+					break
+				}
+				args := strings.ToUpper(data[1].Data.(string))
 				conn.Write([]byte(toRespBulkStrings(args)))
+				fmt.Printf("command: %s, args: %s\n", command, args)
 			case "SET":
-				if resp_arr_len < 3 {
+				if len(data) < 3 {
 					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
 				} else {
-					value := arr[6]
-					with_opts := resp_arr_len >= 5
+					key := data[1].Data.(string)
+					value := data[2].Data.(string)
+					with_opts := len(data) > 3
 					if with_opts {
-						opt := strings.ToUpper(arr[8])
-						param, err := strconv.ParseInt(arr[10], 0, 64)
+						opt := strings.ToUpper(data[3].Data.(string))
+						param, err := strconv.ParseInt(data[4].Data.(string), 0, 64)
 						if err != nil {
 							conn.Write([]byte(toRespSimpleStrings("ERR wrong expire time")))
 						}
 						if opt == "PX" {
-							store.SetPx(args, value, param)
+							store.SetPx(key, value, param)
 							conn.Write([]byte(toRespSimpleStrings("OK")))
 						}
 						for _, replica := range replicas {
 							go func(replica net.Conn) {
-								sendCommand(replica, []string{command, args, value, opt, strconv.FormatInt(param, 10)})
+								sendCommand(replica, []string{command, key, value, opt, strconv.FormatInt(param, 10)})
 							}(replica)
 						}
 					} else {
-						store.Set(args, value)
+						store.Set(key, value)
 						conn.Write([]byte(toRespSimpleStrings("OK")))
 						for _, replica := range replicas {
 							go func(replica net.Conn) {
-								sendCommand(replica, []string{command, args, value})
+								sendCommand(replica, []string{command, key, value})
 							}(replica)
 						}
 					}
 				}
 			case "GET":
-				if value, exist := store.Get(args); exist {
+				key := data[1].Data.(string)
+				if value, exist := store.Get(key); exist {
 					conn.Write([]byte(toRespSimpleStrings(value)))
 				} else {
 					conn.Write([]byte(toRespErrorBulkStrings()))
@@ -227,15 +251,6 @@ func handle(conn net.Conn, store *store.Store) {
 				rdbFile := getRdbFile()
 				conn.Write([]byte(toRdbResponse(rdbFile)))
 				replicas = append(replicas, conn)
-			default:
-				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
-			}
-		} else {
-			switch command {
-			case "PING":
-				conn.Write([]byte(toRespSimpleStrings("PONG")))
-			case "ECHO":
-				conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
 			default:
 				conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
 			}
