@@ -15,11 +15,37 @@ const (
 	Integer
 	BulkString
 	Array
+	RDB
+	NullBulkString
 )
 
 type RESP struct {
 	Type RespType
 	Data interface{}
+}
+
+func (r *RESP) Serialize() string {
+	switch r.Type {
+	case SimpleString:
+		return fmt.Sprintf("+%s\r\n", r.Data)
+	case Error:
+		return fmt.Sprintf("-%s\r\n", r.Data)
+	case Integer:
+		return fmt.Sprintf(":%d\r\n", r.Data)
+	case BulkString:
+		return fmt.Sprintf("$%d\r\n%s\r\n", len(r.Data.(string)), r.Data)
+	case Array:
+		res := fmt.Sprintf("*%d\r\n", len(r.Data.([]*RESP)))
+		for _, element := range r.Data.([]*RESP) {
+			res += element.Serialize()
+		}
+		return res
+	case RDB:
+		return fmt.Sprintf("$%d\r\n%s", len(r.Data.([]byte)), string(r.Data.([]byte)))
+	case NullBulkString:
+		return fmt.Sprintf("$-1\r\n")
+	}
+	panic("unknown RESP type")
 }
 
 func ParseRESP(input string) (*RESP, error) {
