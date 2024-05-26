@@ -61,8 +61,8 @@ func connectToMaster(address string) net.Conn {
 	return conn
 }
 
-func sendCommand(conn net.Conn, msg []string) string {
-	_, err := conn.Write([]byte(toRespArrays(msg)))
+func sendCommand(conn net.Conn, req *Resp.RESP) string {
+	_, err := conn.Write([]byte(req.Serialize()))
 	if err != nil {
 		fmt.Println("send command failed, err:", err.Error())
 	}
@@ -90,10 +90,10 @@ func handshakeToMaster() {
 	fmt.Println("handshake with master: " + masterAddress)
 	conn := connectToMaster(masterAddress)
 	defer conn.Close()
-	sendCommand(conn, []string{"PING"})
-	sendCommand(conn, []string{"REPLCONF", "listening-port", config.port})
-	sendCommand(conn, []string{"REPLCONF", "capa", "psync2"})
-	sendCommand(conn, []string{"PSYNC", "?", "-1"})
+	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.SimpleString, Data: "PING"}}})
+	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.BulkString, Data: "REPLCONF"}, {Type: Resp.BulkString, Data: "listening-port"}, {Type: Resp.BulkString, Data: config.port}}})
+	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.BulkString, Data: "REPLCONF"}, {Type: Resp.BulkString, Data: "capa"}, {Type: Resp.BulkString, Data: "psync2"}}})
+	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.BulkString, Data: "PSYNC"}, {Type: Resp.BulkString, Data: "?"}, {Type: Resp.BulkString, Data: "-1"}}})
 }
 
 func main() {
@@ -172,27 +172,13 @@ func handle(conn net.Conn, store *store.Store) {
 			break
 		}
 		fmt.Printf("req.Type: %v, req.Data: %v\n", req.Type, req.Data)
-		switch req.Type {
-		case Resp.SimpleString:
-			{
-				command := strings.ToUpper(req.Data.([]string)[0])
-				fmt.Printf("command: %s\n", command)
-				switch command {
-				case "PING":
-					conn.Write([]byte(toRespSimpleStrings("PONG")))
-				case "ECHO":
-					conn.Write([]byte(toRespSimpleStrings("ERR wrong number of arguments for command")))
-				default:
-					conn.Write([]byte(toRespSimpleStrings("ERR wrong command " + command)))
-				}
+		res := handleCommand(req, conn, store)
+		if res.Type == Resp.Array {
+			for _, element := range res.Data.([]*Resp.RESP) {
+				conn.Write([]byte(element.Serialize()))
 			}
-		case Resp.Array:
-			res := handleCommand(req, conn, store)
-			if res.Type == Resp.Array {
-				conn.Write([]byte(res.Serialize()))
-			} else {
-				conn.Write([]byte(res.Serialize()))
-			}
+		} else {
+			conn.Write([]byte(res.Serialize()))
 		}
 	}
 }
@@ -240,57 +226,57 @@ func handleCommand(req *Resp.RESP, conn net.Conn, store *store.Store) *Resp.RESP
 				Type: Resp.SimpleString,
 				Data: "ERR wrong number of arguments for command",
 			}
-		} else {
-			key := data[1].Data.(string)
-			value := data[2].Data.(string)
-			with_opts := len(data) > 3
-			if with_opts {
-				opt := strings.ToUpper(data[3].Data.(string))
-				param, err := strconv.ParseInt(data[4].Data.(string), 0, 64)
-				if err != nil {
-					fmt.Println("Error parsing expire time: ", err.Error())
-					return &Resp.RESP{
-						Type: Resp.SimpleString,
-						Data: "ERR wrong expire time",
-					}
-				}
-				var res *Resp.RESP
-				if opt == "PX" {
-					store.SetPx(key, value, param)
-					res = &Resp.RESP{
-						Type: Resp.SimpleString,
-						Data: "OK",
-					}
-				}
-				for _, replica := range replicas {
-					fmt.Println("send command to replica: ", replica.address, ":", replica.port)
-					go func(replica Replica) {
-						replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
-						if err != nil {
-							fmt.Println("Error propagating data to replica: ", err.Error())
-						} else {
-							sendCommand(replicaConn, []string{command, key, value, opt, strconv.FormatInt(param, 10)})
-						}
-					}(replica)
-				}
-				return res
-			} else {
-				store.Set(key, value)
-				for _, replica := range replicas {
-					fmt.Println("send command to replica: ", replica.address, ":", replica.port)
-					go func(replica Replica) {
-						replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
-						if err != nil {
-							fmt.Println("Error propagating data to replica: ", err.Error())
-						} else {
-							sendCommand(replicaConn, []string{command, key, value})
-						}
-					}(replica)
-				}
+		}
+		key := data[1].Data.(string)
+		value := data[2].Data.(string)
+		with_opts := len(data) > 3
+		if with_opts {
+			opt := strings.ToUpper(data[3].Data.(string))
+			param, err := strconv.ParseInt(data[4].Data.(string), 0, 64)
+			if err != nil {
+				fmt.Println("Error parsing expire time: ", err.Error())
 				return &Resp.RESP{
+					Type: Resp.SimpleString,
+					Data: "ERR wrong expire time",
+				}
+			}
+			var res *Resp.RESP
+			if opt == "PX" {
+				store.SetPx(key, value, param)
+				res = &Resp.RESP{
 					Type: Resp.SimpleString,
 					Data: "OK",
 				}
+			}
+			for _, replica := range replicas {
+				fmt.Println("send command to replica: ", replica.address, ":", replica.port)
+				go func(replica Replica) {
+					replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
+					if err != nil {
+						fmt.Println("Error propagating data to replica: ", err.Error())
+					} else {
+						sendCommand(replicaConn, req)
+					}
+				}(replica)
+			}
+			return res
+		}
+		store.Set(key, value)
+		for _, replica := range replicas {
+			fmt.Println("send command to replica: ", replica.address, ":", replica.port)
+			go func(replica Replica) {
+				replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
+				if err != nil {
+					fmt.Println("Error propagating data to replica: ", err.Error())
+				} else {
+					sendCommand(replicaConn, req)
+				}
+			}(replica)
+		}
+		return &Resp.RESP{
+			Type: Resp.SimpleString,
+			Data: "OK",
+		}
 	case "GET":
 		if len(data) < 2 {
 			return &Resp.RESP{
@@ -304,11 +290,10 @@ func handleCommand(req *Resp.RESP, conn net.Conn, store *store.Store) *Resp.RESP
 				Type: Resp.SimpleString,
 				Data: value,
 			}
-		} else {
-			return &Resp.RESP{
-				Type: Resp.NullBulkString,
-				Data: nil,
-			}
+		}
+		return &Resp.RESP{
+			Type: Resp.NullBulkString,
+			Data: nil,
 		}
 	case "INFO":
 		return &Resp.RESP{
@@ -363,39 +348,4 @@ func handleCommand(req *Resp.RESP, conn net.Conn, store *store.Store) *Resp.RESP
 			Data: "ERR wrong command " + command,
 		}
 	}
-}
-
-func toRespSimpleStrings(str string) string {
-	return terminated("+" + str)
-}
-
-func terminated(str string) string {
-	return str + "\r\n"
-}
-
-func toRespErrorBulkStrings() string {
-	return terminated("$-1")
-}
-
-func toRespBulkStrings(str string) string {
-	if str == "" {
-		return terminated("$0" + terminated(""))
-	}
-	length := len(str)
-	lenStr := strconv.Itoa(length)
-	res := terminated("$" + terminated(lenStr) + str)
-	fmt.Println("len:", lenStr, " res:", res)
-	return res
-}
-
-func toRespArrays(arr []string) string {
-	res := fmt.Sprintf("*%d\r\n", len(arr))
-	for _, element := range arr {
-		res += toRespBulkStrings(element)
-	}
-	return res
-}
-
-func toRdbResponse(rdbFile []byte) string {
-	return fmt.Sprintf("$%d\r\n%s", len(rdbFile), string(rdbFile))
 }
