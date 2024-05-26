@@ -291,9 +291,13 @@ func handleCommand(req *Resp.RESP, conn net.Conn, store *store.Store) *Resp.RESP
 					Type: Resp.SimpleString,
 					Data: "OK",
 				}
+	case "GET":
+		if len(data) < 2 {
+			return &Resp.RESP{
+				Type: Resp.SimpleString,
+				Data: "ERR wrong number of arguments for command",
 			}
 		}
-	case "GET":
 		key := data[1].Data.(string)
 		if value, exist := store.Get(key); exist {
 			return &Resp.RESP{
