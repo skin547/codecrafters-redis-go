@@ -314,3 +314,81 @@ func TestIncorrectTypeInArray(t *testing.T) {
 		t.Error("Expected error for incorrect type, got none")
 	}
 }
+
+func TestSerialize(t *testing.T) {
+	tests := []struct {
+		name     string
+		resp     *RESP
+		expected string
+	}{
+		{
+			name: "SimpleString",
+			resp: &RESP{
+				Type: SimpleString,
+				Data: "OK",
+			},
+			expected: "+OK\r\n",
+		},
+		{
+			name: "Error",
+			resp: &RESP{
+				Type: Error,
+				Data: "Error",
+			},
+			expected: "-Error\r\n",
+		},
+		{
+			name: "Integer",
+			resp: &RESP{
+				Type: Integer,
+				Data: int64(123),
+			},
+			expected: ":123\r\n",
+		},
+		{
+			name: "BulkString",
+			resp: &RESP{
+				Type: BulkString,
+				Data: "foo",
+			},
+			expected: "$3\r\nfoo\r\n",
+		},
+		{
+			name: "Array",
+			resp: &RESP{
+				Type: Array,
+				Data: []*RESP{
+					{Type: BulkString, Data: "SET"},
+					{Type: BulkString, Data: "foo"},
+					{Type: BulkString, Data: "123"},
+				},
+			},
+			expected: "*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n",
+		},
+		{
+			name: "Nested Array",
+			resp: &RESP{
+				Type: Array,
+				Data: []*RESP{
+					{
+						Type: Array,
+						Data: []*RESP{
+							{Type: SimpleString, Data: "OK"},
+						},
+					},
+					{Type: Integer, Data: int64(123)},
+				},
+			},
+			expected: "*2\r\n*1\r\n+OK\r\n:123\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := tt.resp.Serialize()
+			if actual != tt.expected {
+				t.Errorf("Serialize() = %q, expected %q", actual, tt.expected)
+			}
+		})
+	}
+}
