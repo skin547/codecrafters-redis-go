@@ -106,11 +106,10 @@ func main() {
 		if flagValue == "" {
 			return nil
 		}
-		replicaConfig.masterHost = flagValue
-		if flag.NArg() != 0 {
-			replicaConfig.masterPort = flag.Arg(0)
+		flagValues := strings.Split(flagValue, " ")
+		replicaConfig.masterHost = flagValues[0]
+		replicaConfig.masterPort = flagValues[1]
 			config.role = "slave"
-		}
 		return nil
 	})
 	config.replica = &replicaConfig
