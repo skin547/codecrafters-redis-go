@@ -43,7 +43,7 @@ func (r *RESP) Serialize() string {
 	case RDB:
 		return fmt.Sprintf("$%d\r\n%s", len(r.Data.([]byte)), string(r.Data.([]byte)))
 	case NullBulkString:
-		return fmt.Sprintf("$-1\r\n")
+		return "$-1\r\n"
 	}
 	panic("unknown RESP type")
 }
@@ -150,6 +150,14 @@ func parseArray(input string) (*RESP, error) {
 		}
 		elements = append(elements, nextResp)
 		currentIndex = nextIndex // Update currentIndex to the end of the last parsed element
+	}
+
+	if currentIndex < len(input) {
+		remainResp, err := parseArray(input[currentIndex:])
+		if err != nil {
+			return nil, err
+		}
+		elements = append(elements, remainResp.Data.([]*RESP)...)
 	}
 
 	return &RESP{
