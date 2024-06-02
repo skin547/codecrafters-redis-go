@@ -11,7 +11,7 @@ func TestParseSimpleString(t *testing.T) {
 		Type: SimpleString,
 		Data: "OK",
 	}
-	actual, err := ParseRESP(input)
+	actual, _, err := ParseRESP(input)
 	if err != nil {
 		t.Errorf("Error parsing simple string: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestParseError(t *testing.T) {
 		Type: Error,
 		Data: "Error",
 	}
-	actual, err := ParseRESP(input)
+	actual, _, err := ParseRESP(input)
 	if err != nil {
 		t.Errorf("Error parsing error: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestParseInteger(t *testing.T) {
 		Type: Integer,
 		Data: int64(123),
 	}
-	actual, err := ParseRESP(input)
+	actual, _, err := ParseRESP(input)
 	if err != nil {
 		t.Errorf("Error parsing integer: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestParseBulkString(t *testing.T) {
 		Type: BulkString,
 		Data: "foobar",
 	}
-	actual, err := ParseRESP(input)
+	actual, _, err := ParseRESP(input)
 	if err != nil {
 		t.Errorf("Error parsing bulk string: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestParseBulkString(t *testing.T) {
 
 func TestParseInvalid(t *testing.T) {
 	input := "foobar\r\n"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -87,7 +87,7 @@ func TestParseInvalid(t *testing.T) {
 
 func TestParseInvalidBulkString(t *testing.T) {
 	input := "$6\r\nfoobar"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -95,7 +95,7 @@ func TestParseInvalidBulkString(t *testing.T) {
 
 func TestParseInvalidInteger(t *testing.T) {
 	input := ":123"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -103,7 +103,7 @@ func TestParseInvalidInteger(t *testing.T) {
 
 func TestParseInvalidSimpleString(t *testing.T) {
 	input := "+OK"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -111,7 +111,7 @@ func TestParseInvalidSimpleString(t *testing.T) {
 
 func TestParseInvalidError(t *testing.T) {
 	input := "-Error"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -119,7 +119,7 @@ func TestParseInvalidError(t *testing.T) {
 
 func TestParseInvalidType(t *testing.T) {
 	input := "foobar"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -134,10 +134,15 @@ func TestParseArrayOfBulkStrings(t *testing.T) {
 			{Type: BulkString, Data: "bar"},
 		},
 	}
-	result, err := parseArray(input)
+	result, _, err := parseArray(input)
 	if err != nil {
 		t.Errorf("parseArray returned an error: %v", err)
+	} else {
+		for _, element := range result.Data.([]*RESP) {
+			t.Logf("element: %+v", element) // print each element of result
+		}
 	}
+
 	if !reflect.DeepEqual(result, expected) {
 		t.Errorf("parseArray returned %+v, expected %+v", result, expected)
 	}
@@ -152,7 +157,11 @@ func TestParseArrayOfSimpleString(t *testing.T) {
 			{Type: SimpleString, Data: "bar"},
 		},
 	}
-	result, err := parseArray(input)
+	result, _, err := parseArray(input)
+	// print each element of result
+	for _, element := range result.Data.([]*RESP) {
+		t.Logf("element: %+v", element) // print each element of result
+	}
 	if err != nil {
 		t.Errorf("parseArray returned an error: %v", err)
 	}
@@ -173,7 +182,7 @@ func TestParseArrayWithIntegers(t *testing.T) {
 	}
 
 	// Call the ParseRESP function or the specific array parsing function
-	got, err := ParseRESP(input)
+	got, _, err := ParseRESP(input)
 	if err != nil {
 		t.Fatalf("ParseRESP failed with error: %v", err)
 	}
@@ -186,7 +195,7 @@ func TestParseArrayWithIntegers(t *testing.T) {
 
 func TestParseInvalidArray(t *testing.T) {
 	input := "*3\r\n+OK\r\n+OK\r\n"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -194,7 +203,7 @@ func TestParseInvalidArray(t *testing.T) {
 
 func TestParseInvalidTypeArray(t *testing.T) {
 	input := "*3"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -202,7 +211,7 @@ func TestParseInvalidTypeArray(t *testing.T) {
 
 func TestParseInvalidTypeBulkString(t *testing.T) {
 	input := "$6"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Errorf("Expected error, got nil")
 	}
@@ -218,7 +227,7 @@ func TestParseArrayWithIntegerAndString(t *testing.T) {
 		},
 	}
 
-	got, err := ParseRESP(input)
+	got, _, err := ParseRESP(input)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -266,7 +275,7 @@ func TestParseArrayWithBulkStringAndError(t *testing.T) {
 		},
 	}
 
-	got, err := ParseRESP(input)
+	got, _, err := ParseRESP(input)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -290,7 +299,7 @@ func TestParseNestedArray(t *testing.T) {
 		},
 	}
 
-	got, err := ParseRESP(input)
+	got, _, err := ParseRESP(input)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -301,7 +310,7 @@ func TestParseNestedArray(t *testing.T) {
 
 func TestIncompleteArrayElement(t *testing.T) {
 	input := "*1\r\n$3\r\nfo"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Error("Expected error, got none")
 	}
@@ -309,7 +318,7 @@ func TestIncompleteArrayElement(t *testing.T) {
 
 func TestIncorrectTypeInArray(t *testing.T) {
 	input := "*1\r\n?3\r\nfoo\r\n"
-	_, err := ParseRESP(input)
+	_, _, err := ParseRESP(input)
 	if err == nil {
 		t.Error("Expected error for incorrect type, got none")
 	}
