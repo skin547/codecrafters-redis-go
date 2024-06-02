@@ -48,9 +48,43 @@ func (r *RESP) Serialize() string {
 	panic("unknown RESP type")
 }
 
-func ParseRESP(input string) (*RESP, error) {
+type RESPParser struct {
+	rawRequest   string
+	CurrentIndex int
+}
+
+func NewRESPParser(input string) *RESPParser {
+	return &RESPParser{
+		rawRequest:   input,
+		CurrentIndex: 0,
+	}
+}
+
+func (p *RESPParser) HasNext() bool {
+	hasNext := p.CurrentIndex < len(p.rawRequest)
+	if hasNext {
+		// print left data
+		fmt.Printf("left data: %s\n", p.rawRequest[p.CurrentIndex:])
+	}
+	fmt.Printf("hasNext: %v\n", hasNext)
+	return hasNext
+}
+
+func (p *RESPParser) ParseNext() (*RESP, error) {
+	if p.CurrentIndex >= len(p.rawRequest) {
+		return nil, errors.New("no more data to parse")
+	}
+	resp, nextIndex, err := ParseRESP(p.rawRequest[p.CurrentIndex:])
+	if err != nil {
+		return nil, err
+	}
+	p.CurrentIndex += nextIndex
+	return resp, nil
+}
+
+func ParseRESP(input string) (*RESP, int, error) {
 	if input == "" {
-		return nil, errors.New("empty input")
+		return nil, 0, errors.New("empty input")
 	}
 	switch input[0] {
 	case '+':
@@ -64,106 +98,99 @@ func ParseRESP(input string) (*RESP, error) {
 	case '*':
 		return parseArray(input)
 	default:
-		return nil, errors.New("unknown RESP type")
+		return nil, 0, fmt.Errorf("unknown RESP type: %s", string(input))
 	}
 }
 
-func parseSimpleString(input string) (*RESP, error) {
+func parseSimpleString(input string) (*RESP, int, error) {
 	end := strings.Index(input, "\r\n")
 	if end == -1 {
-		return nil, errors.New("invalid simple string: no CRLF")
+		return nil, 0, errors.New("invalid simple string: no CRLF")
 	}
 	return &RESP{
 		Type: SimpleString,
 		Data: input[1:end],
-	}, nil
+	}, end + len("\r\n"), nil
 }
 
-func parseError(input string) (*RESP, error) {
+func parseError(input string) (*RESP, int, error) {
 	end := strings.Index(input, "\r\n")
 	if end == -1 {
-		return nil, errors.New("invalid error: no CRLF")
+		return nil, 0, errors.New("invalid error: no CRLF")
 	}
 	return &RESP{
 		Type: Error,
 		Data: input[1:end],
-	}, nil
+	}, end + len("\r\n"), nil
 }
 
-func parseInteger(input string) (*RESP, error) {
+func parseInteger(input string) (*RESP, int, error) {
 	end := strings.Index(input, "\r\n")
 	if end == -1 {
-		return nil, errors.New("invalid integer: no CRLF")
+		return nil, 0, errors.New("invalid integer: no CRLF")
 	}
 	val, err := strconv.ParseInt(input[1:end], 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	return &RESP{
 		Type: Integer,
 		Data: val,
-	}, nil
+	}, end + len("\r\n"), nil
 }
 
-func parseBulkString(input string) (*RESP, error) {
+func parseBulkString(input string) (*RESP, int, error) {
 	end := strings.Index(input, "\r\n")
 	if end == -1 {
-		return nil, errors.New("invalid bulk string: no CRLF")
+		return nil, 0, errors.New("invalid bulk string: no CRLF")
 	}
 	length, err := strconv.ParseInt(input[1:end], 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if length == -1 {
-		return &RESP{Type: BulkString, Data: nil}, nil // Nil bulk string
+		return &RESP{Type: BulkString, Data: nil}, 0, nil // Nil bulk string
 	}
 	startIndex := end + len("\r\n")
 	if int64(len(input)) < int64(startIndex)+length+int64(len("\r\n")) {
-		return nil, errors.New("invalid bulk string: data too short")
+		return nil, 0, errors.New("invalid bulk string: data too short")
 	}
 	data := input[startIndex : startIndex+int(length)]
 	return &RESP{
 		Type: BulkString,
 		Data: data,
-	}, nil
+	}, startIndex + int(length) + len("\r\n"), nil
 }
 
-func parseArray(input string) (*RESP, error) {
+func parseArray(input string) (*RESP, int, error) {
 	arrHeaderEnd := strings.Index(input, "\r\n")
 	if arrHeaderEnd == -1 {
-		return nil, errors.New("invalid array: no CRLF")
+		return nil, 0, errors.New("invalid array: no CRLF")
 	}
 	arrayLength, err := strconv.ParseInt(input[1:arrHeaderEnd], 10, 64)
 	if err != nil {
-		return nil, errors.New("invalid array length")
+		return nil, 0, errors.New("invalid array length")
 	}
 	elements := make([]*RESP, 0, arrayLength)
 	currentIndex := arrHeaderEnd + len("\r\n") // Start right after the init CRLF
 
 	for i := int64(0); i < arrayLength; i++ {
 		if currentIndex >= len(input) {
-			return nil, errors.New("incomplete input data")
+			return nil, 0, errors.New("incomplete input data")
 		}
+		// print the next index
 		nextResp, nextIndex, err := parseNextElement(input, currentIndex)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		elements = append(elements, nextResp)
-		currentIndex = nextIndex // Update currentIndex to the end of the last parsed element
-	}
-
-	if currentIndex < len(input) {
-		remainResp, err := parseArray(input[currentIndex:])
-		if err != nil {
-			return nil, err
-		}
-		elements = append(elements, remainResp.Data.([]*RESP)...)
+		currentIndex += nextIndex // Update currentIndex to the end of the last parsed element
 	}
 
 	return &RESP{
 		Type: Array,
 		Data: elements,
-	}, nil
+	}, currentIndex, nil
 }
 
 // parseNextElement finds and parses the next RESP element in the input string
@@ -171,55 +198,10 @@ func parseNextElement(input string, startIndex int) (*RESP, int, error) {
 	if startIndex >= len(input) {
 		return nil, 0, errors.New("out of bounds when parsing next element")
 	}
-	nextResp, err := ParseRESP(input[startIndex:])
-	if err != nil {
-		return nil, startIndex, err
-	}
-	lengthOfParsed, err := calculateContentLength(nextResp)
+	nextResp, nextIndex, err := ParseRESP(input[startIndex:])
 	if err != nil {
 		return nil, startIndex, err
 	}
 
-	nextIndex := startIndex + lengthOfParsed + len("\r\n")
 	return nextResp, nextIndex, nil
-
-}
-
-func calculateContentLength(nextResp *RESP) (int, error) {
-	var lengthOfParsed = 0
-	switch nextResp.Type {
-	case SimpleString, Error:
-		if str, ok := nextResp.Data.(string); ok {
-			lengthOfParsed = len("+") + len(str)
-		} else {
-			return 0, errors.New("expected string data type")
-		}
-	case Integer:
-		if _, ok := nextResp.Data.(int64); ok {
-			lengthOfParsed = len(":") + len(fmt.Sprintf("%d", nextResp.Data.(int64)))
-		} else {
-			return 0, errors.New("expected integer data type")
-		}
-	case BulkString:
-		lengthSpecifier := strconv.Itoa(len(nextResp.Data.(string)))
-		if str, ok := nextResp.Data.(string); ok {
-			lengthOfParsed = len("$") + len(lengthSpecifier) + len("\r\n") + len(str)
-		} else {
-			return 0, errors.New("expected string data type")
-		}
-	case Array:
-		if arr, ok := nextResp.Data.([]*RESP); ok {
-			lengthOfParsed = len("*") + len(fmt.Sprintf("%d", cap(arr)))
-			for _, element := range arr {
-				contentLength, err := calculateContentLength(element)
-				if err != nil {
-					return 0, err
-				}
-				lengthOfParsed += contentLength + len("\r\n")
-			}
-		} else {
-			return 0, errors.New("expected array data type")
-		}
-	}
-	return lengthOfParsed, nil
 }
