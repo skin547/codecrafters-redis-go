@@ -33,8 +33,7 @@ var config = Config{role: "master"}
 var replicaIdLen = 40
 
 type Replica struct {
-	address string
-	port    int
+	conn net.Conn
 }
 
 var replicas []Replica
@@ -72,7 +71,7 @@ func sendCommand(conn net.Conn, req *Resp.RESP) string {
 		fmt.Println("read connection failed, err:", err.Error())
 	}
 	res := string(data[:n])
-	fmt.Println("handshake response: ", res)
+	fmt.Println("response: ", res)
 	return res
 }
 
@@ -85,15 +84,15 @@ func getRdbFile() []byte {
 	return contents
 }
 
-func handshakeToMaster() {
+func handshakeToMaster() net.Conn {
 	masterAddress := config.replica.masterHost + ":" + config.replica.masterPort
 	fmt.Println("handshake with master: " + masterAddress)
 	conn := connectToMaster(masterAddress)
-	defer conn.Close()
 	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.SimpleString, Data: "PING"}}})
 	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.BulkString, Data: "REPLCONF"}, {Type: Resp.BulkString, Data: "listening-port"}, {Type: Resp.BulkString, Data: config.port}}})
 	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.BulkString, Data: "REPLCONF"}, {Type: Resp.BulkString, Data: "capa"}, {Type: Resp.BulkString, Data: "psync2"}}})
 	sendCommand(conn, &Resp.RESP{Type: Resp.Array, Data: []*Resp.RESP{{Type: Resp.BulkString, Data: "PSYNC"}, {Type: Resp.BulkString, Data: "?"}, {Type: Resp.BulkString, Data: "-1"}}})
+	return conn
 }
 
 func main() {
@@ -125,8 +124,16 @@ func main() {
 	fmt.Println("Listening on " + address)
 
 	fmt.Println("Replica of " + config.replica.masterHost + ":" + config.replica.masterPort + " role: " + config.role + " port: " + config.port)
+
+	store := store.NewStore()
 	if config.role == "slave" {
-		handshakeToMaster()
+		masterConn := handshakeToMaster()
+		// create a standalone go routine to listen command from master
+		go func() {
+			for {
+				handle(masterConn, store, false)
+			}
+		}()
 	}
 	l, err := net.Listen("tcp", address)
 
@@ -135,7 +142,6 @@ func main() {
 	}
 	defer l.Close()
 
-	store := store.NewStore()
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -144,17 +150,16 @@ func main() {
 			continue
 		}
 		fmt.Println("handle a connection:")
-		go handle(conn, store)
+		go handle(conn, store, true)
 	}
 }
 
-func handle(conn net.Conn, store *store.Store) {
+func handle(conn net.Conn, store *store.Store, isMaster bool) {
 	fmt.Println("accept a request, addr:", conn.RemoteAddr().String())
-	defer conn.Close()
 
 	for {
 		reader := bufio.NewReader(conn)
-		p := make([]byte, 512)
+		p := make([]byte, 4096)
 		n, err := reader.Read(p)
 		if err == io.EOF {
 			fmt.Println("Read finish")
@@ -165,21 +170,38 @@ func handle(conn net.Conn, store *store.Store) {
 			break
 		}
 		str := string(p[:n])
-		fmt.Println("Read: ", string(p[:n]))
-		req, err := Resp.ParseRESP(str)
-		if err != nil {
-			fmt.Printf("Parse RESP failed, input: %s\nerr: %s\n", str, err.Error())
-			break
-		}
-		fmt.Printf("req.Type: %v, req.Data: %v\n", req.Type, req.Data)
-		res := handleCommand(req, conn, store)
-		if res.Type == Resp.Array {
-			for _, element := range res.Data.([]*Resp.RESP) {
-				conn.Write([]byte(element.Serialize()))
+		fmt.Println("Read: ", strings.ReplaceAll(string(p[:n]), "\r\n", ","))
+		parser := Resp.NewRESPParser(str)
+		responses := []string{}
+		for parser.HasNext() {
+			// print the state of parser
+			fmt.Printf("parser currentIndex: %v\n", parser.CurrentIndex)
+			req, err := parser.ParseNext()
+			if err != nil {
+				fmt.Printf("Parse RESP failed, input: %s\nerr: %s\n", str, err.Error())
+				break
 			}
-		} else {
-			conn.Write([]byte(res.Serialize()))
+			fmt.Printf("req.Type: %v, req.Data: %v\n", req.Type, req.Data)
+			res := handleCommand(req, conn, store)
+			if !isMaster {
+				break
+			}
+			if res.Type == Resp.Array {
+				for _, element := range res.Data.([]*Resp.RESP) {
+					responses = append(responses, element.Serialize())
+					if element.Type == Resp.RDB {
+						isMaster = false
+					}
+				}
+			} else {
+				responses = append(responses, res.Serialize())
+			}
 		}
+		response := strings.Join(responses, "\r\n")
+		conn.Write([]byte(response))
+	}
+	if isMaster {
+		conn.Close()
 	}
 }
 
@@ -249,28 +271,18 @@ func handleCommand(req *Resp.RESP, conn net.Conn, store *store.Store) *Resp.RESP
 				}
 			}
 			for _, replica := range replicas {
-				fmt.Println("send command to replica: ", replica.address, ":", replica.port)
 				go func(replica Replica) {
-					replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
-					if err != nil {
-						fmt.Println("Error propagating data to replica: ", err.Error())
-					} else {
-						sendCommand(replicaConn, req)
-					}
+					fmt.Printf("send command to replica: %s\n", replica.conn.RemoteAddr().String())
+					sendCommand(replica.conn, req)
 				}(replica)
 			}
 			return res
 		}
 		store.Set(key, value)
 		for _, replica := range replicas {
-			fmt.Println("send command to replica: ", replica.address, ":", replica.port)
 			go func(replica Replica) {
-				replicaConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", replica.address, replica.port))
-				if err != nil {
-					fmt.Println("Error propagating data to replica: ", err.Error())
-				} else {
-					sendCommand(replicaConn, req)
-				}
+				fmt.Printf("send command to replica: %s\n", replica.conn.RemoteAddr().String())
+				sendCommand(replica.conn, req)
 			}(replica)
 		}
 		return &Resp.RESP{
@@ -309,17 +321,8 @@ func handleCommand(req *Resp.RESP, conn net.Conn, store *store.Store) *Resp.RESP
 		}
 		args := strings.ToUpper(data[1].Data.(string))
 		if args == "LISTENING-PORT" {
-			port, err := strconv.Atoi(data[2].Data.(string))
-			if err != nil {
-				fmt.Println("parsing port failed, err:", err.Error())
-				return &Resp.RESP{
-					Type: Resp.SimpleString,
-					Data: "ERR wrong replconf port",
-				}
-			}
 			replicas = append(replicas, Replica{
-				address: strings.Split(conn.RemoteAddr().String(), ":")[0],
-				port:    port,
+				conn: conn,
 			})
 		}
 		return &Resp.RESP{
