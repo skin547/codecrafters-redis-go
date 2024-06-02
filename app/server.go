@@ -156,9 +156,10 @@ func main() {
 
 func handle(conn net.Conn, store *store.Store, isMaster bool) {
 	fmt.Println("accept a request, addr:", conn.RemoteAddr().String())
+
 	for {
 		reader := bufio.NewReader(conn)
-		p := make([]byte, 512)
+		p := make([]byte, 4096)
 		n, err := reader.Read(p)
 		if err == io.EOF {
 			fmt.Println("Read finish")
@@ -169,27 +170,35 @@ func handle(conn net.Conn, store *store.Store, isMaster bool) {
 			break
 		}
 		str := string(p[:n])
-		fmt.Println("Read: ", string(p[:n]))
-		req, err := Resp.ParseRESP(str)
-		if err != nil {
-			fmt.Printf("Parse RESP failed, input: %s\nerr: %s\n", str, err.Error())
-			break
-		}
-		fmt.Printf("req.Type: %v, req.Data: %v\n", req.Type, req.Data)
-		res := handleCommand(req, conn, store)
-		if !isMaster {
-			break
-		}
-		if res.Type == Resp.Array {
-			for _, element := range res.Data.([]*Resp.RESP) {
-				conn.Write([]byte(element.Serialize()))
-				if element.Type == Resp.RDB {
-					isMaster = false
-				}
+		fmt.Println("Read: ", strings.ReplaceAll(string(p[:n]), "\r\n", ","))
+		parser := Resp.NewRESPParser(str)
+		responses := []string{}
+		for parser.HasNext() {
+			// print the state of parser
+			fmt.Printf("parser currentIndex: %v\n", parser.CurrentIndex)
+			req, err := parser.ParseNext()
+			if err != nil {
+				fmt.Printf("Parse RESP failed, input: %s\nerr: %s\n", str, err.Error())
+				break
 			}
-		} else {
-			conn.Write([]byte(res.Serialize()))
+			fmt.Printf("req.Type: %v, req.Data: %v\n", req.Type, req.Data)
+			res := handleCommand(req, conn, store)
+			if !isMaster {
+				break
+			}
+			if res.Type == Resp.Array {
+				for _, element := range res.Data.([]*Resp.RESP) {
+					responses = append(responses, element.Serialize())
+					if element.Type == Resp.RDB {
+						isMaster = false
+					}
+				}
+			} else {
+				responses = append(responses, res.Serialize())
+			}
 		}
+		response := strings.Join(responses, "\r\n")
+		conn.Write([]byte(response))
 	}
 	if isMaster {
 		conn.Close()
